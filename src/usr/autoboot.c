@@ -594,7 +594,7 @@ int ipxe ( struct net_device *netdev ) {
 	if ( ( image = first_image() ) != NULL ) {
 		/* We have an embedded image; execute it */
 		return image_exec ( image );
-	} else if ( shell_banner() ) {
+	} else if ( 1 ) {
 		/* User wants shell; just give them a shell */
 		return shell();
 	} else {

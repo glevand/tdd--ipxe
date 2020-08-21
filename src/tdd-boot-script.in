@@ -1,6 +1,6 @@
 #!ipxe
 
-echo tdd-boot-script @HOST@: ->
+echo @PREFIX@-boot-script @HOST@: ->
 echo Press ctrl-c to exit iPXE auto boot
 ifstat
 
@@ -8,12 +8,12 @@ ifstat
 ifstat
 route
 
-kernel tftp://@TFTP_SERVER@/@HOST@/tdd-kernel
-initrd tftp://@TFTP_SERVER@/@HOST@/tdd-initrd
+kernel tftp://@TFTP_SERVER@/@HOST@/@PREFIX@-kernel
+initrd tftp://@TFTP_SERVER@/@HOST@/@PREFIX@-initrd
 
 imgstat
 
-boot tdd-kernel initrd=tdd-initrd
+boot @PREFIX@-kernel initrd=@PREFIX@-initrd @KERNEL_ARGS@
 
 shell
-echo tdd-boot-script @HOST@: <-
+echo @PREFIX@-boot-script @HOST@: <-

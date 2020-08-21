@@ -85,13 +85,22 @@ check_file() {
 build_image() {
 	local host=${1}
 	local arch=${2}
+	local boot_script=${3}
 
 	echo "${FUNCNAME[0]}: ${host}-${arch}" >&2
 
 	if [[ "${host}" == "generic" ]]; then
+		if [[ -f "${boot_script}" ]]; then
+			echo "${script_name}: ERROR: INTERNAL: boot script '${boot_script}'." >&2
+			exit 1
+		fi
 		unset build_extra
 	else
-		build_extra="EMBED='${output_dir}/ipxe-tdd-${host}.boot-script'"
+		if [[ ! -f "${boot_script}" ]]; then
+			echo "${script_name}: ERROR: INTERNAL: boot script '${boot_script}'." >&2
+			exit 1
+		fi
+		build_extra="EMBED='${boot_script}'"
 	fi
 
 	case "${arch}" in
@@ -128,21 +137,28 @@ build_image() {
 }
 
 process() {
-	rm -f "${output_dir}"/ipxe-tdd-${host}.boot-script
-	cp -f "${SCRIPTS_TOP}"/tdd-boot-script.in "${output_dir}"/tdd-boot-script.tmp
-	sed --in-place "s|@HOST@|${host}|g" "${output_dir}"/tdd-boot-script.tmp
-	sed --in-place "s|@TFTP_SERVER@|${tftp_server}|g" "${output_dir}"/tdd-boot-script.tmp
-	sed --in-place "s|@IF_CONFIG@|${host_if_config}|" "${output_dir}"/tdd-boot-script.tmp
-	mv -f "${output_dir}"/tdd-boot-script.tmp "${output_dir}"/ipxe-tdd-${host}.boot-script
+	local boot_script="${1}"
+	local tmp_file="${output_dir}/tdd-boot-script.tmp"
+
+	rm -f "${boot_script}"
+	cp -f "${SCRIPTS_TOP}/tdd-boot-script.in" "${tmp_file}"
+
+	sed --in-place "s|@PREFIX@|${prefix}|g" "${tmp_file}"
+	sed --in-place "s|@HOST@|${host}|g" "${tmp_file}"
+	sed --in-place "s|@TFTP_SERVER@|${tftp_server}|g" "${tmp_file}"
+	sed --in-place "s|@IF_CONFIG@|${host_if_config}|" "${tmp_file}"
+	sed --in-place "s|@KERNEL_ARGS@|${kernel_args}|g" "${tmp_file}"
+
+	mv -f "${tmp_file}" "${boot_script}"
 
 	if [[ ! ${boot_scripts} ]]; then
 		need_generic["${arch}"]=1
-		build_image "${host}" "${arch}"
+		build_image "${host}" "${arch}" "${boot_script}"
 	fi
 }
 
 parse_static() {
-	# "test1 powerpc 1a:2b:3c:4d:5e:6f 192.168.1.2 255.255.255.0 192.168.1.1 192.168.1.3"
+	# "test1 powerpc 1a:2b:3c:4d:5e:6f 192.168.1.2 255.255.255.0 192.168.1.1 192.168.1.3 k-args"
 
 	for m in "${machines_static[@]}"; do
 		unset host arch mac_addr ip_addr netmask gateway tftp_server
@@ -228,7 +244,7 @@ parse_static() {
 		m="${m#"${m%%[![:space:]]*}"}"
 
 		# tftp_server
-		regex="^${regex_ip}[[:space:]]*$"
+		regex="^${regex_ip}[[:space:]]*"
 		if [[ "${m}" =~ ${regex} ]]; then
 			tftp_server="${BASH_REMATCH[1]}"
 		else
@@ -240,6 +256,18 @@ parse_static() {
 		m="${m#${tftp_server}}"
 		m="${m#"${m%%[![:space:]]*}"}"
 
+		# kernel_args
+		regex="^([[:print:]]*[^[:space:]])[[:space:]]*$"
+		if [[ "${m}" =~ ${regex} ]]; then
+			kernel_args="${BASH_REMATCH[1]}"
+		else
+			unset kernel_args
+		fi
+
+		echo " kernel_args = '${kernel_args}'" >&2
+		m="${m#${kernel_args}}"
+		m="${m#"${m%%[![:space:]]*}"}"
+
 		server_addr="$(dig ${tftp_server} +short)"
 
 		if [[ ${server_addr} ]]; then
@@ -248,12 +276,13 @@ parse_static() {
 
 		host_if_config="ifclose ; set net0/mac ${mac_addr} ; set net0/ip ${ip_addr} ; set net0/netmask ${netmask} ; set net0/gateway ${gateway} ; ifopen net0"
 
-		process
+		process "${output_dir}/ipxe-tdd-${host}.boot-script"
+
 	done
 }
 
 parse_dhcp() {
-	# "test2 arm64 192.168.1.4"
+	# "test2 arm64 192.168.1.4 k-args"
 
 	for m in "${machines_dhcp[@]}"; do
 		unset host tftp_server
@@ -299,6 +328,18 @@ parse_dhcp() {
 		m="${m#${tftp_server}}"
 		m="${m#"${m%%[![:space:]]*}"}"
 
+		# kernel_args
+		regex="^([[:print:]]*[^[:space:]])[[:space:]]*$"
+		if [[ "${m}" =~ ${regex} ]]; then
+			kernel_args="${BASH_REMATCH[1]}"
+		else
+			unset kernel_args
+		fi
+
+		echo " kernel_args = '${kernel_args}'" >&2
+		m="${m#${kernel_args}}"
+		m="${m#"${m%%[![:space:]]*}"}"
+
 		server_addr="$(dig ${tftp_server} +short)"
 
 		if [[ ${server_addr} ]]; then
@@ -307,12 +348,13 @@ parse_dhcp() {
 
 		host_if_config="ifconf"
 
-		process
+		process "${output_dir}/ipxe-tdd-${host}.boot-script"
 	done
 }
 
 #===============================================================================
-export PS4='\[\e[0;33m\]+ ${BASH_SOURCE##*/}:${LINENO}:(${FUNCNAME[0]:-"?"}):\[\e[0m\] '
+export PS4='\[\e[0;33m\]+ ${BASH_SOURCE##*/}:${LINENO}:(${FUNCNAME[0]:-main}):\[\e[0m\] '
+
 set -e
 
 script_name="${0##*/}"
@@ -336,6 +378,8 @@ fi
 
 check_file ${config_file} " --config-file" "usage"
 source ${config_file}
+
+prefix="${prefix:-ipxe}"
 
 if [[ ! "${machines_static[@]}" && ! "${machines_dhcp[@]}" ]]; then
 	echo "${script_name}: ERROR: No machines array: '${config_file}'" >&2
